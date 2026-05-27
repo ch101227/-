@@ -1,126 +1,136 @@
+# app.py
+
 import streamlit as st
-import random
-import pandas as pd
+from google import genai
+from google.genai import types
 
+# =========================
+# 페이지 설정
+# =========================
 st.set_page_config(
-    page_title="AI 식단 추천 앱",
-    page_icon="🥗",
-    layout="wide"
+    page_title="메뉴 추천 챗봇",
+    page_icon="🍽️",
+    layout="centered"
 )
 
-st.title("🥗 AI 식단 추천 앱")
-st.write("냉장고 재료를 입력하면 식단을 추천해드립니다!")
+st.title("🍽️ AI 메뉴 추천 챗봇")
+st.caption("오늘 뭐 먹을지 고민될 때 AI에게 물어보세요!")
 
-# 음식 데이터
-meal_db = [
-    {
-        "name": "닭가슴살 샐러드",
-        "ingredients": ["닭가슴살", "양상추", "토마토"],
-        "calories": 320,
-        "difficulty": "쉬움"
-    },
-    {
-        "name": "김치볶음밥",
-        "ingredients": ["김치", "밥", "계란"],
-        "calories": 550,
-        "difficulty": "쉬움"
-    },
-    {
-        "name": "토마토 파스타",
-        "ingredients": ["토마토", "파스타면", "양파"],
-        "calories": 670,
-        "difficulty": "보통"
-    },
-    {
-        "name": "계란말이",
-        "ingredients": ["계란", "당근", "양파"],
-        "calories": 280,
-        "difficulty": "쉬움"
-    },
-    {
-        "name": "소고기 덮밥",
-        "ingredients": ["소고기", "양파", "밥"],
-        "calories": 720,
-        "difficulty": "보통"
-    },
-]
+# =========================
+# Gemini 설정
+# =========================
+API_KEY = "AIzaSyCuZbTL4jytEEXFDbnLAy6H7EkEGmWR_cI"
 
+try:
+    client = genai.Client(api_key=API_KEY)
+except Exception as e:
+    st.error(f"Gemini 클라이언트 초기화 실패: {e}")
+    st.stop()
+
+MODEL_NAME = "gemini-2.5-flash-lite"
+
+SYSTEM_PROMPT = """
+너는 음식 메뉴 추천 전문 AI 챗봇이다.
+
+사용자의 상황, 기분, 날씨, 시간대, 예산, 선호 음식 등을 고려해서
+먹기 좋은 메뉴를 추천해라.
+
+응답 규칙:
+- 친근하고 자연스럽게 말할 것
+- 메뉴 추천 이유를 함께 설명할 것
+- 가능하면 3개 이상 추천할 것
+- 너무 길지 않게 답변할 것
+"""
+
+# =========================
+# 세션 상태 초기화
+# =========================
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# =========================
+# 기존 채팅 출력
+# =========================
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# =========================
 # 사용자 입력
-st.sidebar.header("🥕 냉장고 재료 입력")
+# =========================
+user_input = st.chat_input("예: 오늘 비 오는데 따뜻한 음식 추천해줘")
 
-user_input = st.sidebar.text_area(
-    "재료를 쉼표(,)로 구분해서 입력하세요",
-    placeholder="예: 계란, 양파, 김치"
-)
+if user_input:
 
-meal_type = st.sidebar.selectbox(
-    "식사 종류",
-    ["아침", "점심", "저녁"]
-)
+    # 사용자 메시지 저장
+    st.session_state.messages.append({
+        "role": "user",
+        "content": user_input
+    })
 
-recommend_btn = st.sidebar.button("식단 추천받기")
+    # 사용자 메시지 출력
+    with st.chat_message("user"):
+        st.markdown(user_input)
 
-# 추천 알고리즘
-if recommend_btn:
+    # AI 응답 생성
+    with st.chat_message("assistant"):
 
-    user_ingredients = [
-        x.strip() for x in user_input.split(",")
-    ]
+        with st.spinner("메뉴 고민 중... 🍜"):
 
-    recommendations = []
+            try:
+                # 이전 대화 기록 구성
+                history_text = ""
 
-    for meal in meal_db:
+                for msg in st.session_state.messages:
+                    role = "사용자" if msg["role"] == "user" else "AI"
+                    history_text += f"{role}: {msg['content']}\n"
 
-        matched = set(user_ingredients) & set(meal["ingredients"])
+                full_prompt = f"""
+{SYSTEM_PROMPT}
 
-        if len(matched) >= 1:
-            recommendations.append({
-                "메뉴": meal["name"],
-                "일치 재료 수": len(matched),
-                "칼로리": meal["calories"],
-                "난이도": meal["difficulty"],
-                "사용 재료": ", ".join(meal["ingredients"])
-            })
+아래는 이전 대화 기록이다.
 
-    st.subheader(f"🍽️ {meal_type} 추천 식단")
+{history_text}
 
-    if recommendations:
+현재 사용자 요청:
+{user_input}
+"""
 
-        recommendations = sorted(
-            recommendations,
-            key=lambda x: x["일치 재료 수"],
-            reverse=True
-        )
+                response = client.models.generate_content(
+                    model=MODEL_NAME,
+                    contents=full_prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.9,
+                        max_output_tokens=1024,
+                    )
+                )
 
-        for item in recommendations:
+                ai_response = response.text
 
-            with st.container():
+                if not ai_response:
+                    ai_response = "죄송해요. 응답을 생성하지 못했어요."
 
-                st.markdown(f"## 🍴 {item['메뉴']}")
+                st.markdown(ai_response)
 
-                col1, col2, col3 = st.columns(3)
+                # AI 응답 저장
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": ai_response
+                })
 
-                col1.metric("칼로리", f"{item['칼로리']} kcal")
-                col2.metric("난이도", item["난이도"])
-                col3.metric("일치 재료", item["일치 재료 수"])
+            except Exception as e:
+                error_message = f"""
+❌ 오류가 발생했습니다.
 
-                st.write(f"**사용 재료:** {item['사용 재료']}")
+에러 내용:
+`{str(e)}`
 
-                st.progress(min(item["일치 재료 수"] / 3, 1.0))
+잠시 후 다시 시도해주세요.
+"""
 
-                st.divider()
+                st.error(error_message)
 
-    else:
-        st.warning("추천 가능한 식단이 없습니다 😢")
-        st.write("다른 재료를 추가해보세요!")
-
-# 랜덤 건강 팁
-tips = [
-    "🥦 채소를 하루 500g 이상 섭취해보세요!",
-    "💧 물을 충분히 마시면 포만감 유지에 도움됩니다.",
-    "🍎 과일은 간식으로 좋아요!",
-    "🏃 식사 후 가벼운 산책을 추천합니다."
-]
-
-st.sidebar.divider()
-st.sidebar.info(random.choice(tips))
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": "오류가 발생했어요. 잠시 후 다시 시도해주세요."
+                })
